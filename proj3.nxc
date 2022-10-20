@@ -60,19 +60,7 @@ void rotate(int degrees)
 void move (int distance_cm){
     if (distance_cm > 0)
     {
-        if (!retreating_from_line)
-        {
-            Acquire(motor_mutex);
-            Acquire(line_mutex);    
-            OnFwd(OUT_BC, 50);
-            Release(line_mutex);
-            Release(motor_mutex);
-        }
-        else 
-        {                
-            OnFwd(OUT_BC, 50);
-        }
-
+        OnFwd(OUT_BC, 50);
         Wait((TimeStright1m*distance_cm)/100);
     }
     else
@@ -88,23 +76,20 @@ void move (int distance_cm){
         else 
         {                
             OnFwd(OUT_BC, -50);
+            Wait(-(TimeStright1m*distance_cm)/100);
+            OnFwd(OUT_BC, 0);
+            Wait(500);
+            return;
         }
 
         Wait(-(TimeStright1m*distance_cm)/100);
     }
+    Acquire(motor_mutex);
+    Acquire(line_mutex);
+    OnFwd(OUT_BC, 0);
+    Release(line_mutex);
+    Release(motor_mutex);
 
-    if (!retreating_from_line)
-    {
-        Acquire(motor_mutex);
-        Acquire(line_mutex);    
-        OnFwd(OUT_BC, 0);
-        Release(line_mutex);
-        Release(motor_mutex);
-    }
-    else 
-    {                
-        OnFwd(OUT_BC, 0);
-    }
         
     Wait(500);
 }
@@ -112,7 +97,7 @@ void move (int distance_cm){
 void retreat_from_line(){
     Acquire(line_mutex);
     retreating_from_line = true;
-    OnFwd(OUT_BC, O);
+    OnFwd(OUT_BC, 0);
     move(-15);
     rotate(-90);
     retreating_from_line = false;
