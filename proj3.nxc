@@ -1,0 +1,247 @@
+#define Kp 15
+#define HiSpeed 40
+#define Ki 1 //3
+#define Ilim 80
+#define Kd 33
+#define LowSpeed 40
+#define White 54
+#define Black 30
+#define Mid ((White + Black) / 2)
+#define AlignSpeed 10
+
+#define TimeRotation360 1900  // za kolik ms provede 360 stupnu otoceni
+#define TimeStright1m   5400  // za kolik ms urazi 1 metr
+#define ObstacleSize    15
+
+int actual, error, turn, powerB, powerC,
+integral, derivative, lasterror, offset;
+mutex motor_mutex;
+
+void rotate(int degrees)
+{
+    int m1, m2;
+    if (degrees < 0)
+    {
+        m1 = OUT_B;
+        m2 = OUT_C;
+        degrees = -degrees;
+    }
+    else if (degrees > 0)
+    {
+        m1 = OUT_C;
+        m2 = OUT_B;
+    }
+    else
+        return;
+
+    OnFwd(m1, 50);
+    OnFwd(m2, -50);
+    Wait((TimeRotation360 * degrees) / 360);
+    OnFwd(m1, 0);
+    OnFwd(m2, 0);
+    Wait(500);
+}
+
+void move (int distance_cm){
+    if (distance_cm > 0)
+    {
+        OnFwd(OUT_BC, 50);
+        Wait((TimeStright1m*distance_cm)/100);
+    }
+    else
+    {
+        OnFwd(OUT_BC, -50);
+        Wait(-(TimeStright1m*distance_cm)/100);
+    }
+    OnFwd(OUT_BC, 0);
+    Wait(500);
+}
+
+void evade (){
+    rotate(90);
+    move(ObstacleSize);
+    rotate(-90);
+    move(ObstacleSize * 2);
+    rotate(-90);
+    do //hleda caru
+    {
+        OnFwd(OUT_BC, LowSpeed);
+        offset=Sensor(IN_3);
+    } while (offset>Mid);
+    rotate(70);
+}
+
+task object_on_path() //resi prekazku na ceste
+{   /*
+    while(true) {}
+    SetSensorUltrasonic(IN_1);
+    while (SensorUS(IN_1)>24)//najde prekazku
+    {
+       // Wait(250);
+    }
+    PlayTone(220,500);
+    Acquire(motor_mutex);//objede prekazku
+    OnFwd(OUT_BC, 0);
+    Wait(500);
+    evade();
+    OnFwd(OUT_BC, 0);
+    Release(motor_mutex);
+    */
+}
+
+bool is_on_line()
+{
+    return Sensor(IN_3) < Mid;
+}
+
+void align_with_line()
+{
+    move(-1);
+    PlayTone(220,500);
+    Wait(1000);
+    
+    /*if (is_on_line())
+    {
+        rotate(5);
+    }
+    
+    return;*/
+    
+
+
+    offset = Mid;
+
+    bool on_black = false;
+    while (true) //sleduje caru
+    {
+        actual = Sensor(IN_3);
+
+        error = offset - actual;
+
+        turn = (Kp * error);
+        turn = turn / 5;
+        powerB = AlignSpeed + turn;
+        powerC = AlignSpeed;
+        
+        if (powerB > 99)
+        {
+            powerB = 99;
+        }
+        if (powerC > 99)
+        {
+            powerC = 99;
+        }
+        
+        if (error < 0)
+        {
+            on_black = true;
+        }
+        if (on_black && error > 0)
+        {
+            PlayTone(220,500);
+            Wait(1000);
+            return;
+        }
+
+        Acquire(motor_mutex);
+        OnFwd(OUT_C,powerC);
+        OnFwd(OUT_B,powerB);
+        Release(motor_mutex);
+
+        Wait(10);
+    }
+}
+
+void find_line()
+{
+    OnFwd(OUT_B, LowSpeed / 2);
+    OnFwd(OUT_C, -LowSpeed / 2);
+
+    int time = 0;
+    while (time < TimeRotation360 * 4)
+    {
+        if (is_on_line())
+        {
+            OnFwd(OUT_BC, 0);
+            return;
+        }
+        time += 10;
+        Wait(10);
+    }
+
+    OnFwd(OUT_B, LowSpeed * 2 / 3);
+    OnFwd(OUT_C, LowSpeed);
+    while (!is_on_line()) {}
+    OnFwd(OUT_BC, 0);
+}
+
+task follow_line() //sleduje pravou hranu cerne cary
+{
+    SetSensorLight(IN_3);
+    integral = 0;
+    derivative = 0;
+    lasterror = 0;
+    
+    find_line();
+    align_with_line();
+
+    offset = Mid;
+    PlayTone(220,500);
+
+    while (true) //sleduje caru
+    {
+        actual = Sensor(IN_3);
+
+        error = offset - actual;
+        derivative = error - lasterror;
+        integral += error;
+        lasterror = error;
+
+        if (integral > Ilim)
+           integral = Ilim;
+        if (integral < -Ilim)
+           integral = -Ilim;
+
+        turn = (Kp * error)+ (Ki * integral) + (Kd *derivative);
+        turn = turn / 10;
+        powerB = HiSpeed - turn;
+        powerC = HiSpeed + turn;
+
+        if (powerB < 0)
+        {
+            powerB = 0;
+        }
+        else if (powerB > 99)
+        {
+            powerB = 99;
+        }
+
+        if (powerC < 0)
+        {
+            powerC = 0;
+        }
+        else if (powerC > 99)
+        {
+            powerC = 99;
+        }
+
+        Acquire(motor_mutex);
+        OnFwd(OUT_C,powerC);
+        OnFwd(OUT_B,powerB);
+        Release(motor_mutex);
+        
+        Wait(10);
+    }
+    
+    /*while (true){
+        Acquire(motor_mutex);
+        OnFwd(OUT_BC, HiSpeed);
+        Release(motor_mutex);
+    }*/
+}
+
+task main()
+{
+    Precedes(follow_line, object_on_path);
+}
+

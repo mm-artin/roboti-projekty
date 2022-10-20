@@ -1,0 +1,12 @@
+task main(){
+    int shade;
+    SetSensorLight(IN_3);
+    //SetSensorUltrasonic(IN_1);
+    while(true){
+        //shade=SensorUS(IN_1);
+        shade = Sensor(IN_3);
+        TextOut(0, 0, NumToStr(shade));
+        DisplayEraseMask();
+        Wait(300);
+    }
+}

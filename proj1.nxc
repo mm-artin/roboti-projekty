@@ -1,0 +1,71 @@
+#define Kp 50 //18
+#define HiSpeed 90
+#define Ki 1 //3
+#define Ilim 80
+#define Kd 120 //55
+#define LowSpeed 20
+#define White 54
+#define Black 30
+#define Mid ((White + Black) / 2)
+
+int actual, error, turn, powerB, powerC,
+integral, derivative, lasterror,
+offset, white, black;
+
+task main(){
+    SetSensorLight(IN_3);
+    integral = 0;
+    derivative = 0;
+    lasterror = 0;
+    
+    do //hleda caru
+    {
+        OnFwd(OUT_BC, LowSpeed);
+        offset=Sensor(IN_3);
+    } while (offset>Mid);
+
+    offset = Mid;
+    PlayTone(220,500);
+
+    while (true) //sleduje caru
+    {
+        actual = Sensor(IN_3);
+
+        error = offset - actual;
+        derivative = error - lasterror;
+        integral += error;
+        lasterror = error;
+        
+        if (integral > Ilim)
+           integral = Ilim;
+        if (integral < -Ilim)
+           integral = -Ilim;
+        
+        turn = (Kp * error)+ (Ki * integral) + (Kd *derivative);
+        turn = turn / 10;
+        powerB = HiSpeed - turn;
+        powerC = HiSpeed + turn;
+
+        if (powerB < 0)
+        {
+            powerB = 0;
+        }
+        else if (powerB > 99)
+        {
+            powerB = 99;
+        }
+
+        if (powerC < 0)
+        {
+            powerC = 0;
+        }
+        else if (powerC > 99)
+        {
+            powerC = 99;
+        }
+
+        OnFwd(OUT_C,powerC);
+        OnFwd(OUT_B,powerB);
+        Wait(20);
+    }
+}
