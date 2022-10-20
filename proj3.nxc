@@ -5,9 +5,10 @@
 #define Mid ((White + Black) / 2)
 
 #define TimeRotation360 1900  // za kolik ms provede 360 stupnu otoceni
-#define TimeStrght1m   5400  // za kolik ms urazi 1 metr
+#define TimeStright1m   5400  // za kolik ms urazi 1 metr
 
-mutex motor_mutex;
+mutex motor_mutex, line_mutex;
+bool retreating_from_line = false;
 
 void rotate(int degrees)
 {
@@ -26,27 +27,96 @@ void rotate(int degrees)
     else
         return;
 
-    OnFwd(m1, 50);
-    OnFwd(m2, -50);
-    Wait((TimeRotation360 * degrees) / 360);
-    OnFwd(m1, 0);
-    OnFwd(m2, 0);
+    if (retreating_from_line){
+            
+        OnFwd(m1, 50);
+        OnFwd(m2, -50);
+        Wait((TimeRotation360 * degrees) / 360);
+        OnFwd(m1, 0);
+        OnFwd(m2, 0);
+    }
+    else
+    {
+        Acquire(motor_mutex);
+        Acquire(line_mutex);
+        OnFwd(m1, 50);
+        OnFwd(m2, -50);
+        Release(line_mutex);
+        Release(motor_mutex);
+
+        Wait((TimeRotation360 * degrees) / 360);
+
+        Acquire(motor_mutex);
+        Acquire(line_mutex);
+        OnFwd(m1, 0);
+        OnFwd(m2, 0);
+        Release(line_mutex);
+        Release(motor_mutex);
+    }
+
     Wait(500);
 }
 
 void move (int distance_cm){
     if (distance_cm > 0)
     {
-        OnFwd(OUT_BC, 50);
-        Wait((TimeStrght1m*distance_cm)/100);
+        if (!retreating_from_line)
+        {
+            Acquire(motor_mutex);
+            Acquire(line_mutex);    
+            OnFwd(OUT_BC, 50);
+            Release(line_mutex);
+            Release(motor_mutex);
+        }
+        else 
+        {                
+            OnFwd(OUT_BC, 50);
+        }
+
+        Wait((TimeStright1m*distance_cm)/100);
     }
     else
     {
-        OnFwd(OUT_BC, -50);
-        Wait(-(TimeStrght1m*distance_cm)/100);
+        if (!retreating_from_line)
+        {
+            Acquire(motor_mutex);
+            Acquire(line_mutex);    
+            OnFwd(OUT_BC, -50);
+            Release(line_mutex);
+            Release(motor_mutex);
+        }
+        else 
+        {                
+            OnFwd(OUT_BC, -50);
+        }
+
+        Wait(-(TimeStright1m*distance_cm)/100);
     }
-    OnFwd(OUT_BC, 0);
+
+    if (!retreating_from_line)
+    {
+        Acquire(motor_mutex);
+        Acquire(line_mutex);    
+        OnFwd(OUT_BC, 0);
+        Release(line_mutex);
+        Release(motor_mutex);
+    }
+    else 
+    {                
+        OnFwd(OUT_BC, 0);
+    }
+        
     Wait(500);
+}
+
+void retreat_from_line(){
+    Acquire(line_mutex);
+    retreating_from_line = true;
+    OnFwd(OUT_BC, O);
+    move(-15);
+    rotate(-90);
+    retreating_from_line = false;
+    Release(line_mutex);    
 }
 
 bool is_on_line()
@@ -54,16 +124,54 @@ bool is_on_line()
     return Sensor(IN_3) < Mid;
 }
 
-task motors() {
+bool found_obstacle(){
+    return SensorUS(IN_1) < 100;
+}
 
+task motors() {
+    while (true)
+    {
+        rotate(360);
+        move (20);
+    }
 }
 
 task line() {
-    
+    while(true)
+    {
+        if (is_on_line())
+        {
+            retreat_from_line();
+        }
+        Wait(10);
+    }
 }
 
 task obstacle() {
-
+    bool set_on_obstacle = false;
+    while(true)
+    {
+        if(found_obstacle())
+        {
+            if (!set_on_obstacle)
+            {
+                set_on_obstacle = true;
+                Acquire(motor_mutex);
+            }
+            Acquire(line_mutex);
+            OnFwd(OUT_BC, HiSpeed);
+            Release(line_mutex);
+        }
+        else if (set_on_obstacle)
+        {
+            set_on_obstacle = false;
+            Acquire(line_mutex);
+            OnFwd(OUT_BC, 0);
+            Release(line_mutex);
+            Release(motor_mutex);
+        }
+        Wait(100);
+    }
 }
 
 task main()
