@@ -1,0 +1,182 @@
+#define InputUS IN_1
+#define InputLight IN_3
+
+#define CubeSpeed 40
+#define MoveSpeed 50
+/*
+#define White 54
+#define Black 30
+#define Mid ((White + Black) / 2)
+*/  #define Mid 42
+
+#define TimeRotation360 1900  // za kolik ms provede 360 stupnu otoceni
+#define TimeStraight1m   5400  // za kolik ms urazi 1 metr
+
+#define IsOnLine (Sensor(InputLight) < Mid)
+#define FoundObstacle (SensorUS(InputUS) < 100)
+
+
+bool mutexes[2] = {0, 0};
+    //0 volny, 1 blokovano
+    //zde indexy:
+        #define CubeMutex 0 //blokovano kdyz vidi kostku
+        #define LineMutex 1 //blokovano kdyz couva od cary
+            /*pri manipulaci s motory zamykany v TOMTO poradi
+              odemykany v OPACNEM*/
+
+
+
+void acquire(int arr[], int arr__size){
+    //zamkne zamky z mutexes v DANEM poradi
+    for (int i = 0; i < arr__size; ++i){
+        until (mutexes[arr[i]] == 0);
+        mutexes[arr[i]] = 1;
+    }
+}
+
+void release(int arr[], int arr__size){
+    //odemkne zamky z mutexes v OPACNEM poradi
+    for (int i = arr__size-1; i >= 0; --i){
+        mutexes[arr[i]] = 0;
+    }
+}
+
+void stop_wait(){
+    //zastavi na 50ms, proti prokluzu kol
+    OnFwd(OUT_BC, 0);
+    Wait(50);
+}
+
+void rotate(int degrees, int interruptable_by[], int interruptable_by__size){
+    //prerusitelne zamky z interruptable_by
+    int m1, m2;
+    if (degrees < 0){
+        m1 = OUT_B;
+        m2 = OUT_C;
+        degrees = -degrees;
+    }
+    else if (degrees > 0){
+        m1 = OUT_C;
+        m2 = OUT_B;
+    }
+    else
+        return;
+
+    acquire(interruptable_by, interruptable_by__size);
+    stop_wait();
+    OnFwd(m1, 50);
+    OnFwd(m2, -50);
+    release(interruptable_by, interruptable_by__size);
+
+    Wait((TimeRotation360 * degrees) / 360);
+
+    acquire(interruptable_by, interruptable_by__size);
+    stop_wait();
+    release(interruptable_by, interruptable_by__size);
+}
+
+void move (int distance_cm, int interruptable_by[], int interruptable_by__size){
+    //prerusitelne zamky z interruptable_by
+    int speed = MoveSpeed;
+    if (distance_cm < 0){
+        speed = -speed;
+        distance_cm = -distance_cm;
+    }
+
+    acquire(interruptable_by, interruptable_by__size);
+    stop_wait();
+    OnFwd(OUT_BC, speed);
+    release(interruptable_by, interruptable_by__size);
+
+    Wait((TimeStraight1m*distance_cm)/100);
+
+    acquire(interruptable_by, interruptable_by__size);
+    stop_wait();
+    release(interruptable_by, interruptable_by__size);
+}
+
+void retreat_from_line(){//couvne od cary a otoci se
+    //neprerustilne
+    int interrupts[]={LineMutex};
+    int interrupts__size = 1;
+
+    acquire(interrupts, interrupts__size);
+
+    move(-15, interrupts, 0);/*neprerusitelne, resp.
+                              prerusitelne prvnimi 0 zamky z interrupts*/
+    rotate(-90, interrupts, 0);
+
+    release(interrupts, interrupts__size);
+}
+
+
+task wander(){//popojizdi kolem
+    int interruptable_by[]={CubeMutex, LineMutex};
+    int interruptable_by__size = 2;
+
+    while (true){
+        rotate(360, interruptable_by, interruptable_by__size);
+        move (20, interruptable_by, interruptable_by__size);
+    }
+}
+
+
+
+task line(){//hleda caru, pripadne couvne od ni a otoci se
+    //neprerusitlene
+    while(true){
+        if (IsOnLine){
+            retreat_from_line();
+        }
+        Wait(10);
+    }
+}
+
+
+
+task obstacle(){//hleda kostku; az ji najde, jede primo na ni
+    int interruptable_by[] = {LineMutex};
+    int interruptable_by__size = 1;
+    int interrupts[] = {CubeMutex};
+    int interrupts__size = 1;
+
+    bool set_on_obstacle = false;
+
+    while(true){
+        if(FoundObstacle){//vidi kostku
+            if (!set_on_obstacle){//TED ji nasel
+                set_on_obstacle = true;
+                acquire(interrupts, interrupts__size);
+
+                acquire(interruptable_by, interruptable_by__size);
+                stop_wait();
+                release(interruptable_by, interruptable_by__size);
+            }
+
+            acquire(interruptable_by, interruptable_by__size);
+            OnFwd(OUT_BC, CubeSpeed);//jed primo na kostku
+            release(interruptable_by, interruptable_by__size);
+        }
+        else if (set_on_obstacle){//TED ztratil kostku
+
+            acquire(interruptable_by, interruptable_by__size);
+            stop_wait();
+            release(interruptable_by, interruptable_by__size);
+
+            set_on_obstacle = false;
+            release(interrupts, interrupts__size);
+        }
+        //else = posledni dobou kostku nevidel
+        //     pass
+
+        Wait(100);
+    }
+}
+
+
+
+task main(){
+    SetSensorLight(InputLight);
+    SetSensorUltrasonic(InputUS);
+    Precedes(wander, line, obstacle);
+}
